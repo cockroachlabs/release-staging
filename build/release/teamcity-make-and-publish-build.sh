@@ -7,9 +7,13 @@ source "$(dirname "${0}")/teamcity-support.sh"
 tc_start_block "Variable Setup"
 export BUILDER_HIDE_GOPATH_SRC=1
 
+# Make sure the local tags are up-to-date.
+git fetch -t
+
 build/builder.sh make .buildinfo/tag
 build_name="${TAG_NAME:-$(cat .buildinfo/tag)}"
 release_branch="$(echo "$build_name" | grep -Eo "^v[0-9]+\.[0-9]+")"
+is_custom_build="$(echo "$TC_BUILD_BRANCH" | grep -Eo "^custombuild-")"
 
 if [[ -z "${DRY_RUN}" ]] ; then
   bucket="${BUCKET-cockroach-builds}"
@@ -82,7 +86,14 @@ tc_end_block "Tag docker image as latest-build"
 cat << EOF
 
 
-Git Tag: ${build_name}
+Build ID: ${build_name}
 
 
 EOF
+
+
+if [[ -n "${is_custom_build}" ]] ; then
+  tc_start_block "Delete custombuild tag"
+  push_to_git ssh://git@github.com/cockroachdb/cockroach.git --delete "${TC_BUILD_BRANCH}"
+  tc_end_block "Delete custombuild tag"
+fi
