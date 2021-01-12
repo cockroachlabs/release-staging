@@ -14,6 +14,7 @@
 #include <rocksdb/convenience.h>
 #include <rocksdb/perf_context.h>
 #include <rocksdb/sst_file_writer.h>
+#include <rocksdb/sst_file_manager.h>
 #include <rocksdb/table.h>
 #include <rocksdb/utilities/checkpoint.h>
 #include <stdarg.h>
@@ -240,6 +241,10 @@ DBStatus DBOpen(DBEngine** db, DBSlice dir, DBOptions db_opts) {
 
   // Point rocksdb to the env to use.
   options.env = env_mgr->db_env;
+
+  // Enable deletion pacing in RocksDB.
+  options.sst_file_manager.reset(
+    rocksdb::NewSstFileManager(options.env, nullptr, "", 128 * 1024 * 1024 /* 128 MB/sec */));
 
   rocksdb::DB* db_ptr;
   rocksdb::Status status;
