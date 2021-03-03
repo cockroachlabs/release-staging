@@ -6496,3 +6496,182 @@ AND descriptor_ids[1] = 'db.t2'::regclass::int`,
 	require.Equal(t, status, jobs.StatusCanceled)
 	require.Equal(t, error, "job canceled by user")
 }
+
+// TestRevertingJobsOnDatabasesAndSchemas tests that schema change jobs on
+// databases and schemas return an error from the OnFailOrCancel hook. It also
+// tests that such jobs are not cancelable. Regression test for #59415.
+func TestRevertingJobsOnDatabasesAndSchemas(t *testing.T) {
+	defer leaktest.AfterTest(t)()
+	defer setTestJobsAdoptInterval()()
+
+	testCases := []struct {
+		name       string
+		setupStmts string
+		scStmt     string
+		jobRegex   string
+	}{
+		{
+			name:       "drop schema",
+			setupStmts: `CREATE DATABASE db_drop_schema; USE db_drop_schema; CREATE SCHEMA sc;`,
+			scStmt:     `USE db_drop_schema; DROP SCHEMA sc`,
+			jobRegex:   `^DROP SCHEMA sc$`,
+		},
+		{
+			name:       "rename schema",
+			setupStmts: `CREATE DATABASE db_rename_schema; USE db_rename_schema; CREATE SCHEMA sc;`,
+			scStmt:     `USE db_rename_schema; ALTER SCHEMA sc RENAME TO new_name`,
+			jobRegex:   `^ALTER SCHEMA sc RENAME TO new_name$`,
+		},
+		{
+			name:       "grant on schema",
+			setupStmts: `CREATE DATABASE db_grant_on_schema; USE db_grant_on_schema; CREATE SCHEMA sc;`,
+			scStmt:     `USE db_grant_on_schema; GRANT ALL ON SCHEMA sc TO PUBLIC`,
+			jobRegex:   `updating privileges for schema`,
+		},
+		{
+			name:       "drop database cascade",
+			setupStmts: `CREATE DATABASE db_drop; USE db_drop; CREATE SCHEMA sc; CREATE TABLE db_drop.sc.tbl(); USE defaultdb;`,
+			scStmt:     `DROP DATABASE db_drop CASCADE`,
+			jobRegex:   `^DROP DATABASE db_drop CASCADE$`,
+		},
+		{
+			name:       "rename database",
+			setupStmts: `CREATE DATABASE db_rename;`,
+			scStmt:     `ALTER DATABASE db_rename RENAME TO db_new_name`,
+			jobRegex:   `^ALTER DATABASE db_rename RENAME TO db_new_name$`,
+		},
+		{
+			name:       "grant on database",
+			setupStmts: `CREATE DATABASE db_grant`,
+			scStmt:     `GRANT ALL ON DATABASE db_grant TO PUBLIC`,
+			jobRegex:   `updating privileges for database`,
+		},
+	}
+
+	ctx := context.Background()
+
+	t.Run("failed due to injected error", func(t *testing.T) {
+		var s serverutils.TestServerInterface
+		params, _ := tests.CreateTestServerParams()
+		params.Knobs = base.TestingKnobs{
+			SQLSchemaChanger: &sql.SchemaChangerTestingKnobs{
+				RunBeforeResume: func(jobID int64) error {
+					scJob, err := s.JobRegistry().(*jobs.Registry).LoadJob(ctx, jobID)
+					if err != nil {
+						return err
+					}
+					pl := scJob.Payload()
+					// This is a hacky way to only inject errors in the rename/drop/grant jobs.
+					if strings.Contains(pl.Description, "updating parent database") {
+						return nil
+					}
+					for _, s := range []string{"DROP", "RENAME", "updating privileges"} {
+						if strings.Contains(pl.Description, s) {
+							return errors.New("injected permanent error")
+						}
+					}
+					return nil
+				},
+			},
+		}
+		var db *gosql.DB
+		s, db, _ = serverutils.StartServer(t, params)
+		defer s.Stopper().Stop(ctx)
+		sqlDB := sqlutils.MakeSQLRunner(db)
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				sqlDB.Exec(t, tc.setupStmts)
+				sqlDB.ExpectErr(t, "injected permanent error", tc.scStmt)
+				result := sqlDB.QueryStr(t,
+					`SELECT status, error FROM crdb_internal.jobs WHERE description ~ $1`,
+					tc.jobRegex)
+				require.Len(t, result, 1)
+				status, jobError := result[0][0], result[0][1]
+				require.Equal(t, string(jobs.StatusFailed), status)
+				require.Regexp(t,
+					"cannot be reverted, manual cleanup may be required: "+
+						"schema change jobs on databases and schemas cannot be reverted",
+					jobError)
+			})
+		}
+	})
+
+	t.Run("canceling not allowed", func(t *testing.T) {
+		var state = struct {
+			mu    syncutil.Mutex
+			jobID int64
+			// Closed in the RunBeforeResume testing knob.
+			beforeResumeNotification chan struct{}
+			// Closed when we're ready to resume the schema change.
+			continueNotification chan struct{}
+		}{}
+		initNotification := func() (chan struct{}, chan struct{}) {
+			state.mu.Lock()
+			defer state.mu.Unlock()
+			state.beforeResumeNotification = make(chan struct{})
+			state.continueNotification = make(chan struct{})
+			return state.beforeResumeNotification, state.continueNotification
+		}
+		notifyBeforeResume := func(jobID int64) {
+			state.mu.Lock()
+			defer state.mu.Unlock()
+			state.jobID = jobID
+			if state.beforeResumeNotification != nil {
+				close(state.beforeResumeNotification)
+				state.beforeResumeNotification = nil
+			}
+			if state.continueNotification != nil {
+				<-state.continueNotification
+			}
+		}
+
+		var s serverutils.TestServerInterface
+		params, _ := tests.CreateTestServerParams()
+		params.Knobs = base.TestingKnobs{
+			SQLSchemaChanger: &sql.SchemaChangerTestingKnobs{
+				RunBeforeResume: func(jobID int64) error {
+					scJob, err := s.JobRegistry().(*jobs.Registry).LoadJob(ctx, jobID)
+					if err != nil {
+						return err
+					}
+					pl := scJob.Payload()
+					// This is a hacky way to only block in the rename/drop/grant jobs.
+					if strings.Contains(pl.Description, "updating parent database") {
+						return nil
+					}
+					for _, s := range []string{"DROP", "RENAME", "updating privileges"} {
+						if strings.Contains(pl.Description, s) {
+							notifyBeforeResume(jobID)
+						}
+					}
+					return nil
+				},
+			},
+		}
+		var db *gosql.DB
+		s, db, _ = serverutils.StartServer(t, params)
+		defer s.Stopper().Stop(ctx)
+		sqlDB := sqlutils.MakeSQLRunner(db)
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				beforeResumeNotification, continueNotification := initNotification()
+				sqlDB.Exec(t, tc.setupStmts)
+
+				g := ctxgroup.WithContext(ctx)
+				g.GoCtx(func(ctx context.Context) error {
+					_, err := db.ExecContext(ctx, tc.scStmt)
+					assert.NoError(t, err)
+					return nil
+				})
+
+				<-beforeResumeNotification
+				sqlDB.ExpectErr(t, "not cancelable", "CANCEL JOB $1", state.jobID)
+
+				close(continueNotification)
+				require.NoError(t, g.Wait())
+			})
+		}
+	})
+}
