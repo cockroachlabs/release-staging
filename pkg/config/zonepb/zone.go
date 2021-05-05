@@ -60,25 +60,29 @@ var NamedZonesByID = func() map[uint32]string {
 // ZoneSpecifierFromID creates a tree.ZoneSpecifier for the zone with the
 // given ID.
 func ZoneSpecifierFromID(
-	id uint32, resolveID func(id uint32) (parentID uint32, name string, err error),
+	id uint32, resolveID func(id uint32) (parentID, parentSchemaID uint32, name string, err error),
 ) (tree.ZoneSpecifier, error) {
 	if name, ok := NamedZonesByID[id]; ok {
 		return tree.ZoneSpecifier{NamedZone: tree.UnrestrictedName(name)}, nil
 	}
-	parentID, name, err := resolveID(id)
+	parentID, parentSchemaID, name, err := resolveID(id)
 	if err != nil {
 		return tree.ZoneSpecifier{}, err
 	}
 	if parentID == keys.RootNamespaceID {
 		return tree.ZoneSpecifier{Database: tree.Name(name)}, nil
 	}
-	_, db, err := resolveID(parentID)
+	_, _, schemaName, err := resolveID(parentSchemaID)
+	if err != nil {
+		return tree.ZoneSpecifier{}, err
+	}
+	_, _, databaseName, err := resolveID(parentID)
 	if err != nil {
 		return tree.ZoneSpecifier{}, err
 	}
 	return tree.ZoneSpecifier{
 		TableOrIndex: tree.TableIndexName{
-			Table: tree.MakeTableName(tree.Name(db), tree.Name(name)),
+			Table: tree.MakeTableNameWithSchema(tree.Name(databaseName), tree.Name(schemaName), tree.Name(name)),
 		},
 	}, nil
 }

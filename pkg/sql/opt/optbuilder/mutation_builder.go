@@ -265,10 +265,9 @@ func (mb *mutationBuilder) buildInputForUpdate(
 		noRowLocking,
 		inScope,
 	)
-	mb.outScope = mb.fetchScope
 
 	// Set list of columns that will be fetched by the input expression.
-	mb.setFetchColIDs(mb.outScope.cols)
+	mb.setFetchColIDs(mb.fetchScope.cols)
 
 	// If there is a FROM clause present, we must join all the tables
 	// together with the table being updated.
@@ -277,18 +276,25 @@ func (mb *mutationBuilder) buildInputForUpdate(
 		fromScope := mb.b.buildFromTables(from, noRowLocking, inScope)
 
 		// Check that the same table name is not used multiple times.
-		mb.b.validateJoinTableNames(mb.outScope, fromScope)
+		mb.b.validateJoinTableNames(mb.fetchScope, fromScope)
 
 		// The FROM table columns can be accessed by the RETURNING clause of the
 		// query and so we have to make them accessible.
 		mb.extraAccessibleCols = fromScope.cols
 
 		// Add the columns in the FROM scope.
+		// We create a new scope so that fetchScope is not modified. It will be
+		// used later to build partial index predicate expressions, and we do
+		// not want ambiguities with column names in the FROM clause.
+		mb.outScope = mb.fetchScope.replace()
+		mb.outScope.appendColumnsFromScope(mb.fetchScope)
 		mb.outScope.appendColumnsFromScope(fromScope)
 
-		left := mb.outScope.expr.(memo.RelExpr)
+		left := mb.fetchScope.expr.(memo.RelExpr)
 		right := fromScope.expr.(memo.RelExpr)
 		mb.outScope.expr = mb.b.factory.ConstructInnerJoin(left, right, memo.TrueFilter, memo.EmptyJoinPrivate)
+	} else {
+		mb.outScope = mb.fetchScope
 	}
 
 	// WHERE
@@ -690,6 +696,20 @@ func (mb *mutationBuilder) roundDecimalValues(colIDs opt.ColList, roundComputedC
 		// Overwrite the input column ID with the new synthesized column ID.
 		colIDs[i] = scopeCol.id
 		mb.roundedDecimalCols.Add(scopeCol.id)
+
+		// When building an UPDATE..FROM expression the projectionScope may have
+		// two columns with different names but the same ID. As a result, the
+		// scope column with the correct name (the name of the target column)
+		// may not be returned from projectionScope.getColumn. We set the name
+		// of the new scope column to the target column name to ensure it is
+		// in-scope when building CHECK constraint and partial index PUT
+		// expressions. See #61520.
+		// TODO(mgartner): Find a less brittle way to manage the scopes of
+		// mutations so that this isn't necessary. Ideally the scope produced by
+		// addUpdateColumns would not include columns in the FROM clause. Those
+		// columns are only in-scope in the RETURNING clause via
+		// mb.extraAccessibleCols.
+		scopeCol.name = mb.tab.Column(i).ColName()
 	}
 
 	if projectionsScope != nil {

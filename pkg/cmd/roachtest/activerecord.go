@@ -20,8 +20,8 @@ import (
 
 var activerecordResultRegex = regexp.MustCompile(`^(?P<test>[^\s]+#[^\s]+) = (?P<timing>\d+\.\d+ s) = (?P<result>.)$`)
 var railsReleaseTagRegex = regexp.MustCompile(`^v(?P<major>\d+)\.(?P<minor>\d+)\.(?P<point>\d+)\.?(?P<subpoint>\d*)$`)
-var supportedRailsVersion = "6.0.3.4"
-var adapterVersion = "v6.0.0beta3"
+var supportedRailsVersion = "6.1"
+var adapterVersion = "v6.1.0-beta.2"
 
 // This test runs activerecord's full test suite against a single cockroach node.
 
@@ -37,6 +37,9 @@ func registerActiveRecord(r *testRegistry) {
 		node := c.Node(1)
 		t.Status("setting up cockroach")
 		c.Put(ctx, cockroach, "./cockroach", c.All())
+		if err := c.PutLibraries(ctx, "./lib"); err != nil {
+			t.Fatal(err)
+		}
 		c.Start(ctx, t, c.All())
 
 		version, err := fetchCockroachVersion(ctx, c, node[0])

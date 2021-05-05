@@ -1918,7 +1918,7 @@ extra_float_digits                             0                   NULL  user   
 force_savepoint_restart                        off                 NULL  user     NULL      off                 off
 foreign_key_cascades_limit                     10000               NULL  user     NULL      10000               10000
 idle_in_session_timeout                        0                   NULL  user     NULL      0s                  0s
-idle_in_transaction_session_timeout            0                   NULL  user     NULL      0                   0
+idle_in_transaction_session_timeout            0                   NULL  user     NULL      0s                  0s
 integer_datetimes                              on                  NULL  user     NULL      on                  on
 intervalstyle                                  postgres            NULL  user     NULL      postgres            postgres
 locality                                       region=test,dc=dc1  NULL  user     NULL      region=test,dc=dc1  region=test,dc=dc1
@@ -1941,7 +1941,7 @@ server_version_num                             90500               NULL  user   
 session_user                                   root                NULL  user     NULL      root                root
 sql_safe_updates                               off                 NULL  user     NULL      off                 off
 standard_conforming_strings                    on                  NULL  user     NULL      on                  on
-statement_timeout                              0                   NULL  user     NULL      0                   0
+statement_timeout                              0                   NULL  user     NULL      0s                  0s
 synchronize_seqscans                           on                  NULL  user     NULL      on                  on
 synchronous_commit                             on                  NULL  user     NULL      on                  on
 timezone                                       UTC                 NULL  user     NULL      UTC                 UTC
@@ -2500,6 +2500,24 @@ select * from pg_indexes where indexname = 'regression_46450_idx'
 ----
 357708632  public  regression_46450  regression_46450_idx  NULL  CREATE INDEX regression_46450_idx ON test.public.regression_46450 USING gin (json ASC)
 
+# Make sure indexdef uses user-defined schemas.
+
+statement ok
+CREATE SCHEMA test_schema;
+CREATE TABLE test_schema.test (
+  a INT PRIMARY KEY,
+  b INT
+);
+CREATE index on test_schema.test(b)
+
+query TTTT colnames
+SELECT schemaname, tablename, indexname, indexdef
+FROM pg_indexes WHERE schemaname='test_schema' and tablename='test'
+----
+schemaname   tablename  indexname   indexdef
+test_schema  test       primary     CREATE UNIQUE INDEX "primary" ON test.test_schema.test USING btree (a ASC)
+test_schema  test       test_b_idx  CREATE INDEX test_b_idx ON test.test_schema.test USING btree (b ASC)
+
 # Make sure that selecting from vtables with indexes in other dbs properly
 # hides descriptors that should be hidden.
 
@@ -2611,13 +2629,13 @@ CREATE TABLE jt (a INT PRIMARY KEY); INSERT INTO jt VALUES(1); INSERT INTO jt VA
 query ITT
 SELECT a, oid, relname FROM jt INNER LOOKUP JOIN pg_class ON a::oid=oid
 ----
-95  95  jt
+97  97  jt
 
 query ITT
 SELECT a, oid, relname FROM jt LEFT OUTER LOOKUP JOIN pg_class ON a::oid=oid
 ----
 1   NULL  NULL
-95  95    jt
+97  97  jt
 
 subtest regression_49207
 statement ok

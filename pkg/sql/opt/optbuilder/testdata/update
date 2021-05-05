@@ -1778,3 +1778,100 @@ update t
       └── projections
            ├── (partial_index_put1_new:9 > 0) AND (partial_index_del1_new:10 > 0) [as=partial_index_put1:11]
            └── (t.partial_index_put1:5 > 0) AND (t.partial_index_del1:6 > 0) [as=partial_index_del1:12]
+
+build
+UPDATE partial_indexes SET a = v.a FROM (VALUES (1), (2)) AS v(a) WHERE partial_indexes.a = v.a
+----
+update partial_indexes
+ ├── columns: <none>
+ ├── fetch columns: a:5 b:6 c:7
+ ├── update-mapping:
+ │    └── column1:9 => a:1
+ ├── partial index put columns: partial_index_put1:10 partial_index_put2:11 partial_index_put3:13 partial_index_put4:14
+ ├── partial index del columns: partial_index_put1:10 partial_index_del2:12 partial_index_put3:13 partial_index_put4:14
+ └── project
+      ├── columns: partial_index_put1:10 partial_index_put2:11 partial_index_del2:12 partial_index_put3:13 partial_index_put4:14 a:5!null b:6 c:7 crdb_internal_mvcc_timestamp:8 column1:9!null
+      ├── distinct-on
+      │    ├── columns: a:5!null b:6 c:7 crdb_internal_mvcc_timestamp:8 column1:9!null
+      │    ├── grouping columns: a:5!null
+      │    ├── select
+      │    │    ├── columns: a:5!null b:6 c:7 crdb_internal_mvcc_timestamp:8 column1:9!null
+      │    │    ├── inner-join (cross)
+      │    │    │    ├── columns: a:5!null b:6 c:7 crdb_internal_mvcc_timestamp:8 column1:9!null
+      │    │    │    ├── scan partial_indexes
+      │    │    │    │    ├── columns: a:5!null b:6 c:7 crdb_internal_mvcc_timestamp:8
+      │    │    │    │    └── partial index predicates
+      │    │    │    │         ├── secondary: filters
+      │    │    │    │         │    └── c:7 = 'foo'
+      │    │    │    │         └── secondary: filters
+      │    │    │    │              └── (a:5 > b:6) AND (c:7 = 'bar')
+      │    │    │    ├── values
+      │    │    │    │    ├── columns: column1:9!null
+      │    │    │    │    ├── (1,)
+      │    │    │    │    └── (2,)
+      │    │    │    └── filters (true)
+      │    │    └── filters
+      │    │         └── a:5 = column1:9
+      │    └── aggregations
+      │         ├── first-agg [as=b:6]
+      │         │    └── b:6
+      │         ├── first-agg [as=c:7]
+      │         │    └── c:7
+      │         ├── first-agg [as=crdb_internal_mvcc_timestamp:8]
+      │         │    └── crdb_internal_mvcc_timestamp:8
+      │         └── first-agg [as=column1:9]
+      │              └── column1:9
+      └── projections
+           ├── c:7 = 'foo' [as=partial_index_put1:10]
+           ├── (column1:9 > b:6) AND (c:7 = 'bar') [as=partial_index_put2:11]
+           ├── (a:5 > b:6) AND (c:7 = 'bar') [as=partial_index_del2:12]
+           ├── c:7 = 'delete-only' [as=partial_index_put3:13]
+           └── c:7 = 'write-only' [as=partial_index_put4:14]
+
+# Regression test for #61520. The new value for column a (project as b:8) should
+# be in-scope when building the partial index PUT expression when the value in
+# the FROM clause must be rounded.
+
+exec-ddl
+CREATE TABLE t61520 (
+  a DECIMAL(10, 2),
+  INDEX (a) WHERE a > 0
+)
+----
+
+build
+UPDATE t61520 t SET a = v.b FROM (VALUES (1.0)) v(b) WHERE t.a = v.b RETURNING a, b
+----
+project
+ ├── columns: a:1 b:7
+ └── update t
+      ├── columns: a:1 rowid:2!null column1:7
+      ├── fetch columns: a:4 rowid:5
+      ├── update-mapping:
+      │    └── b:8 => a:1
+      ├── partial index put columns: partial_index_put1:9
+      ├── partial index del columns: partial_index_del1:10
+      └── project
+           ├── columns: partial_index_put1:9 partial_index_del1:10!null a:4!null rowid:5!null crdb_internal_mvcc_timestamp:6 column1:7!null b:8
+           ├── project
+           │    ├── columns: b:8 a:4!null rowid:5!null crdb_internal_mvcc_timestamp:6 column1:7!null
+           │    ├── select
+           │    │    ├── columns: a:4!null rowid:5!null crdb_internal_mvcc_timestamp:6 column1:7!null
+           │    │    ├── inner-join (cross)
+           │    │    │    ├── columns: a:4 rowid:5!null crdb_internal_mvcc_timestamp:6 column1:7!null
+           │    │    │    ├── scan t
+           │    │    │    │    ├── columns: a:4 rowid:5!null crdb_internal_mvcc_timestamp:6
+           │    │    │    │    └── partial index predicates
+           │    │    │    │         └── secondary: filters
+           │    │    │    │              └── a:4 > 0
+           │    │    │    ├── values
+           │    │    │    │    ├── columns: column1:7!null
+           │    │    │    │    └── (1.0,)
+           │    │    │    └── filters (true)
+           │    │    └── filters
+           │    │         └── a:4 = column1:7
+           │    └── projections
+           │         └── crdb_internal.round_decimal_values(column1:7, 2) [as=b:8]
+           └── projections
+                ├── b:8 > 0 [as=partial_index_put1:9]
+                └── a:4 > 0 [as=partial_index_del1:10]
