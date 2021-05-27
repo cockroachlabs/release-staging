@@ -162,6 +162,7 @@ func (g *gcsStorage) WriteFile(ctx context.Context, basename string, content io.
 		return contextutil.RunWithTimeout(ctx, "put gcs file", timeoutSetting.Get(&g.settings.SV),
 			func(ctx context.Context) error {
 				w := g.bucket.Object(path.Join(g.prefix, basename)).NewWriter(ctx)
+				w.ChunkSize = 0
 				if _, err := io.Copy(w, content); err != nil {
 					_ = w.Close()
 					return err
