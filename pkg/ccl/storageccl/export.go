@@ -207,6 +207,7 @@ func evalExport(
 				// We blindly retry any error here because we expect the caller to have
 				// verified the target is writable before sending ExportRequests for it.
 				if err := exportStore.WriteFile(ctx, exported.Path, bytes.NewReader(data)); err != nil {
+					log.Warningf(ctx, "failed to put file: %+v", err)
 					log.VEventf(ctx, 1, "failed to put file: %+v", err)
 					return err
 				}

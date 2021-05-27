@@ -164,6 +164,7 @@ func (g *gcsStorage) WriteFile(ctx context.Context, basename string, content io.
 				w := g.bucket.Object(path.Join(g.prefix, basename)).NewWriter(ctx)
 				w.ChunkSize = 0
 				if _, err := io.Copy(w, content); err != nil {
+					log.Warningf(ctx, "failed to write gcs file: %+v", err)
 					_ = w.Close()
 					return err
 				}
