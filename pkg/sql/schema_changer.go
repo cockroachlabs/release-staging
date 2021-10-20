@@ -1391,8 +1391,9 @@ func (sc *SchemaChanger) done(ctx context.Context) error {
 	return nil
 }
 
-// If this mutation is a primary key swap and the old index had an
-// interleaved parent, remove the backreference from the parent.
+// If this mutation is a primary key swap that is not being rolled back,
+// and the old index had an interleaved parent, remove the backreference
+// from the parent.
 func maybeRemoveInterleaveBackreference(
 	ctx context.Context,
 	txn *kv.Txn,
@@ -1401,6 +1402,9 @@ func maybeRemoveInterleaveBackreference(
 	scTable *tabledesc.Mutable,
 	writeFunc func(ctx context.Context, ancestor *tabledesc.Mutable) error,
 ) error {
+	if mutation.Direction != descpb.DescriptorMutation_ADD {
+		return nil
+	}
 	pkSwap := mutation.GetPrimaryKeySwap()
 	if pkSwap == nil {
 		return nil
