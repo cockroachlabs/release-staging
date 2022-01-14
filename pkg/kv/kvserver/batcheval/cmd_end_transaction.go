@@ -316,8 +316,15 @@ func EndTxn(
 		}
 
 		// Else, the transaction can be explicitly committed.
+		if reply.Txn.Status == roachpb.STAGING {
+			log.Infof(ctx, "moving txn %v from STAGING to COMMITTED", reply.Txn)
+		}
 		reply.Txn.Status = roachpb.COMMITTED
 	} else {
+		if reply.Txn.Status == roachpb.STAGING {
+			log.Infof(ctx, "moving txn %v from STAGING to ABORTED", reply.Txn)
+		}
+
 		reply.Txn.Status = roachpb.ABORTED
 	}
 

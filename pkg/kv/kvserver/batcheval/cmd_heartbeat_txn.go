@@ -20,6 +20,7 @@ import (
 	"github.com/cockroachdb/cockroach/pkg/roachpb"
 	"github.com/cockroachdb/cockroach/pkg/storage"
 	"github.com/cockroachdb/cockroach/pkg/util/hlc"
+	"github.com/cockroachdb/cockroach/pkg/util/log"
 )
 
 func init() {
@@ -75,6 +76,7 @@ func HeartbeatTxn(
 		// NOTE: this only updates the LastHeartbeat. It doesn't update any other
 		// field from h.Txn, even if it could. Whether that's a good thing or not
 		// is up for debate.
+		log.Infof(ctx, "heartbeat record for txn %v", &txn)
 		txn.LastHeartbeat.Forward(args.Now)
 		txnRecord := txn.AsRecord()
 		if err := storage.MVCCPutProto(ctx, readWriter, cArgs.Stats, key, hlc.Timestamp{}, nil, &txnRecord); err != nil {

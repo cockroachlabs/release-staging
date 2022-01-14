@@ -292,6 +292,10 @@ func PushTxn(
 	// Determine what to do with the pushee, based on the push type.
 	switch pushType {
 	case roachpb.PUSH_ABORT:
+		if ok && reply.PusheeTxn.Status == roachpb.STAGING {
+			log.Infof(ctx, "moving txn %v from STAGING to ABORTED", reply.PusheeTxn)
+		}
+
 		// If aborting the transaction, set the new status.
 		reply.PusheeTxn.Status = roachpb.ABORTED
 		// If the transaction record was already present, forward the timestamp

@@ -19,6 +19,7 @@ import (
 	"github.com/cockroachdb/cockroach/pkg/roachpb"
 	"github.com/cockroachdb/cockroach/pkg/storage"
 	"github.com/cockroachdb/cockroach/pkg/util/hlc"
+	"github.com/cockroachdb/cockroach/pkg/util/log"
 	"github.com/cockroachdb/errors"
 )
 
@@ -113,10 +114,12 @@ func RecoverTxn(
 			// harmless, but we now use the timestamp cache to avoid
 			// needing to ever do so. If this ever becomes possible again, we'll
 			// need to relax this check.
-			return result.Result{}, errors.AssertionFailedf(
+			err := errors.AssertionFailedf(
 				"programming error: found %s record for implicitly committed transaction: %v",
 				reply.RecoveredTxn.Status, reply.RecoveredTxn,
 			)
+			log.Errorf(ctx, "%+v", err)
+			return result.Result{}, err
 		case roachpb.STAGING, roachpb.COMMITTED:
 			if was, is := args.Txn.Epoch, reply.RecoveredTxn.Epoch; was != is {
 				return result.Result{}, errors.AssertionFailedf(
@@ -184,6 +187,7 @@ func RecoverTxn(
 				return result.Result{}, nil
 			}
 			// Continue with recovery.
+			log.Infof(ctx, "moving txn %v from STAGING to ABORTED", reply.RecoveredTxn)
 		default:
 			return result.Result{}, errors.AssertionFailedf("bad txn status: %s", reply.RecoveredTxn)
 		}

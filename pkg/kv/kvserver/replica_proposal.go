@@ -387,6 +387,9 @@ func (r *Replica) leasePostApplyLocked(
 		if newLease.Type() == roachpb.LeaseEpoch && leaseChangingHands || log.V(1) {
 			log.VEventf(ctx, 1, "new range lease %s following %s", newLease, prevLease)
 		}
+		if leaseChangingHands {
+			log.Infof(ctx, "new range lease %s following %s", newLease, prevLease)
+		}
 	}
 
 	if leaseChangingHands && iAmTheLeaseHolder {
