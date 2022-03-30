@@ -18,6 +18,7 @@ import (
 	"bufio"
 	"bytes"
 	"compress/gzip"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"log"
@@ -563,6 +564,19 @@ func PutRelease(svc S3Putter, o PutReleaseOptions) {
 	}
 	if _, err := svc.PutObject(&putObjectInput); err != nil {
 		log.Fatalf("s3 upload %s: %s", targetArchive, err)
+	}
+	targetChecksum := targetArchive + ".sha256sum"
+	contents := fmt.Sprintf("%x %s\n", sha256.Sum256(body.Bytes()), filepath.Base(targetArchive))
+	putObjectInputChecksum := s3.PutObjectInput{
+		Bucket: &o.BucketName,
+		Key:    &targetChecksum,
+		Body:   bytes.NewReader([]byte(contents)),
+	}
+	if o.NoCache {
+		putObjectInputChecksum.CacheControl = &NoCache
+	}
+	if _, err := svc.PutObject(&putObjectInputChecksum); err != nil {
+		log.Fatalf("s3 upload %s: %s", targetChecksum, err)
 	}
 }
 
