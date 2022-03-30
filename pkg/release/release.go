@@ -197,7 +197,7 @@ func MakeWorkload(pkgDir string) error {
 
 // MakeRelease makes the release binary and associated files.
 func MakeRelease(platform Platform, opts BuildOptions, pkgDir string) error {
-	buildArgs := []string{"build", "//pkg/cmd/cockroach", "//c-deps:libgeos"}
+	buildArgs := []string{"build", "//pkg/cmd/cockroach", "//c-deps:libgeos", "//pkg/cmd/cockroach-sql"}
 	targetTriple := TargetTripleFromPlatform(platform)
 	if opts.Release {
 		if opts.BuildTag == "" {
@@ -227,6 +227,10 @@ func MakeRelease(platform Platform, opts BuildOptions, pkgDir string) error {
 		return err
 	}
 	if err := stageBinary("//pkg/cmd/cockroach", platform, bazelBin, pkgDir); err != nil {
+		return err
+	}
+	// TODO: strip the bianry
+	if err := stageBinary("//pkg/cmd/cockroach-sql", platform, bazelBin, pkgDir); err != nil {
 		return err
 	}
 	if err := stageLibraries(platform, bazelBin, filepath.Join(pkgDir, "lib")); err != nil {
@@ -434,10 +438,9 @@ type ArchiveFile struct {
 }
 
 // MakeCRDBBinaryArchiveFile generates the ArchiveFile object for a CRDB binary.
-func MakeCRDBBinaryArchiveFile(localAbsolutePath string) ArchiveFile {
+func MakeCRDBBinaryArchiveFile(localAbsolutePath string, path string) ArchiveFile {
 	base := filepath.Base(localAbsolutePath)
 	_, hasExe := TrimDotExe(base)
-	path := "cockroach"
 	if hasExe {
 		path += ".exe"
 	}
@@ -476,7 +479,8 @@ type PutReleaseOptions struct {
 	VersionStr string
 
 	// Files are all the files to be included in the archive.
-	Files []ArchiveFile
+	Files      []ArchiveFile
+	ExtraFiles []ArchiveFile
 }
 
 // PutRelease uploads a compressed archive containing the release
@@ -583,6 +587,24 @@ func PutRelease(svc S3Putter, o PutReleaseOptions) {
 	}
 	if _, err := svc.PutObject(&putObjectInputChecksum); err != nil {
 		log.Fatalf("s3 upload %s: %s", targetChecksum, err)
+	}
+	for _, f := range o.ExtraFiles {
+		log.Printf("Uploading to s3://%s/%s", o.BucketName, f.ArchiveFilePath)
+		handle, err := os.Open(f.LocalAbsolutePath)
+		if err != nil {
+			log.Fatalf("failed to open %s: %s", f.LocalAbsolutePath, err)
+		}
+		putObjectInput := s3.PutObjectInput{
+			Bucket: &o.BucketName,
+			Key:    &f.ArchiveFilePath,
+			Body:   handle,
+		}
+		if o.NoCache {
+			putObjectInput.CacheControl = &NoCache
+		}
+		if _, err := svc.PutObject(&putObjectInput); err != nil {
+			log.Fatalf("s3 upload %s: %s", f.ArchiveFilePath, err)
+		}
 	}
 }
 
