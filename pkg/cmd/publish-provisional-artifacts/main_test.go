@@ -55,7 +55,9 @@ func (s *mockS3) PutObject(i *s3.PutObjectInput) (*s3.PutObjectOutput, error) {
 		if err != nil {
 			return nil, err
 		}
-		if utf8.Valid(bytes) {
+		if strings.HasSuffix(*i.Key, ".sha256sum") {
+			s.puts = append(s.puts, fmt.Sprintf("%s CONTENTS <sha256sum>", url))
+		} else if utf8.Valid(bytes) {
 			s.puts = append(s.puts, fmt.Sprintf("%s CONTENTS %s", url, bytes))
 		} else {
 			s.puts = append(s.puts, fmt.Sprintf("%s CONTENTS <binary stuff>", url))
@@ -159,10 +161,14 @@ func TestProvisional(t *testing.T) {
 			expectedPuts: []string{
 				"s3://binaries.cockroachdb.com/cockroach-v0.0.1-alpha.linux-amd64.tgz " +
 					"CONTENTS <binary stuff>",
+				"s3://binaries.cockroachdb.com/cockroach-v0.0.1-alpha.linux-amd64.tgz.sha256sum CONTENTS <sha256sum>",
 				"s3://binaries.cockroachdb.com/cockroach-v0.0.1-alpha.darwin-10.9-amd64.tgz " +
 					"CONTENTS <binary stuff>",
+				"s3://binaries.cockroachdb.com/cockroach-v0.0.1-alpha.darwin-10.9-amd64.tgz.sha256sum CONTENTS <sha256sum>",
 				"s3://binaries.cockroachdb.com/cockroach-v0.0.1-alpha.windows-6.2-amd64.zip " +
 					"CONTENTS <binary stuff>",
+				"s3://binaries.cockroachdb.com/cockroach-v0.0.1-alpha.windows-6.2-amd64.zip." +
+					"sha256sum CONTENTS <sha256sum>",
 			},
 		},
 		{
@@ -259,16 +265,22 @@ func TestBless(t *testing.T) {
 			},
 			expectedGets: []string{
 				"s3://binaries.cockroachdb.com/cockroach-v0.0.1.linux-amd64.tgz",
+				"s3://binaries.cockroachdb.com/cockroach-v0.0.1.linux-amd64.tgz.sha256sum",
 				"s3://binaries.cockroachdb.com/cockroach-v0.0.1.darwin-10.9-amd64.tgz",
+				"s3://binaries.cockroachdb.com/cockroach-v0.0.1.darwin-10.9-amd64.tgz.sha256sum",
 				"s3://binaries.cockroachdb.com/cockroach-v0.0.1.windows-6.2-amd64.zip",
+				"s3://binaries.cockroachdb.com/cockroach-v0.0.1.windows-6.2-amd64.zip.sha256sum",
 			},
 			expectedPuts: []string{
 				"s3://binaries.cockroachdb.com/cockroach-latest.linux-amd64.tgz/no-cache " +
 					"CONTENTS s3://binaries.cockroachdb.com/cockroach-v0.0.1.linux-amd64.tgz",
+				"s3://binaries.cockroachdb.com/cockroach-latest.linux-amd64.tgz.sha256sum/no-cache CONTENTS <sha256sum>",
 				"s3://binaries.cockroachdb.com/cockroach-latest.darwin-10.9-amd64.tgz/no-cache " +
 					"CONTENTS s3://binaries.cockroachdb.com/cockroach-v0.0.1.darwin-10.9-amd64.tgz",
+				"s3://binaries.cockroachdb.com/cockroach-latest.darwin-10.9-amd64.tgz.sha256sum/no-cache CONTENTS <sha256sum>",
 				"s3://binaries.cockroachdb.com/cockroach-latest.windows-6.2-amd64.zip/no-cache " +
 					"CONTENTS s3://binaries.cockroachdb.com/cockroach-v0.0.1.windows-6.2-amd64.zip",
+				"s3://binaries.cockroachdb.com/cockroach-latest.windows-6.2-amd64.zip.sha256sum/no-cache CONTENTS <sha256sum>",
 			},
 		},
 	}
