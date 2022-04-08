@@ -1002,6 +1002,7 @@ func (ex *connExecutor) close(ctx context.Context, closeType closeType) {
 
 	if ex.hasCreatedTemporarySchema && !ex.server.cfg.TestingKnobs.DisableTempObjectsCleanupOnSessionExit {
 		ie := MakeInternalExecutor(ctx, ex.server, MemoryMetrics{}, ex.server.cfg.Settings)
+		defer ie.close(ctx)
 		err := cleanupSessionTempObjects(
 			ctx,
 			ex.server.cfg.Settings,
@@ -1056,6 +1057,11 @@ func (ex *connExecutor) close(ctx context.Context, closeType closeType) {
 		ex.state.mon.EmergencyStop(ctx)
 		ex.sessionMon.EmergencyStop(ctx)
 		ex.mon.EmergencyStop(ctx)
+	}
+	if internalExec := ex.planner.extendedEvalCtx.InternalExecutor; internalExec != nil {
+		if ie, ok := internalExec.(*InternalExecutor); ok {
+			ie.close(ctx)
+		}
 	}
 }
 

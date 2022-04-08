@@ -115,6 +115,13 @@ func MakeInternalExecutor(
 	}
 }
 
+func (ie *InternalExecutor) close(ctx context.Context) {
+	if ie.mon != nil {
+		ie.mon.Stop(ctx)
+		ie.mon = nil
+	}
+}
+
 // SetSessionData binds the session variables that will be used by queries
 // performed through this executor from now on. This creates a new session stack.
 // It is recommended to use SetSessionDataStack.
