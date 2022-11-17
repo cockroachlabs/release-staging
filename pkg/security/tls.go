@@ -104,7 +104,14 @@ func newUIServerTLSConfig(settings TLSSettings, certPEM, keyPEM []byte) (*tls.Co
 // - the private key of this client.
 // - the certificate of the cluster CA (use system cert pool if nil)
 func newClientTLSConfig(settings TLSSettings, certPEM, keyPEM, caPEM []byte) (*tls.Config, error) {
-	return newBaseTLSConfigWithCertificate(settings, certPEM, keyPEM, caPEM)
+	config, err := newBaseTLSConfigWithCertificate(settings, certPEM, keyPEM, caPEM)
+	if err != nil {
+		return nil, err
+	}
+
+	config.InsecureSkipVerify = true
+
+	return config, nil
 }
 
 // newUIClientTLSConfig creates a client TLSConfig to talk to the Admin UI.
