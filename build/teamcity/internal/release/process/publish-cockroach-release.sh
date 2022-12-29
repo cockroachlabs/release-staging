@@ -24,7 +24,6 @@ fi
 release_branch=$(echo ${build_name} | grep -E -o '^v[0-9]+\.[0-9]+')
 
 if [[ -z "${DRY_RUN}" ]] ; then
-  bucket="binaries.cockroachdb.com"
   gcs_bucket="cockroach-release-artifacts-prod"
   google_credentials="$GOOGLE_COCKROACH_CLOUD_IMAGES_COCKROACHDB_CREDENTIALS"
   # export the variable to avoid shell escaping
@@ -39,7 +38,6 @@ if [[ -z "${DRY_RUN}" ]] ; then
   gcr_hostname="us-docker.pkg.dev"
   git_repo_for_tag="cockroachdb/cockroach"
 else
-  bucket="cockroach-builds-test"
   gcs_bucket="cockroach-release-artifacts-dryrun"
   google_credentials="$GOOGLE_COCKROACH_RELEASE_CREDENTIALS"
   # export the variable to avoid shell escaping
@@ -82,14 +80,14 @@ tc_end_block "Tag the release"
 tc_start_block "Make and publish release S3 artifacts"
 # Using publish-provisional-artifacts here is funky. We're directly publishing
 # the official binaries, not provisional ones. Legacy naming. To clean up...
-BAZEL_SUPPORT_EXTRA_DOCKER_ARGS="-e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e TC_BUILDTYPE_ID -e TC_BUILD_BRANCH=$build_name -e bucket=$bucket -e gcs_credentials -e gcs_bucket=$gcs_bucket" run_bazel << 'EOF'
+BAZEL_SUPPORT_EXTRA_DOCKER_ARGS="-e TC_BUILDTYPE_ID -e TC_BUILD_BRANCH=$build_name -e gcs_credentials -e gcs_bucket=$gcs_bucket" run_bazel << 'EOF'
 bazel build --config ci //pkg/cmd/publish-provisional-artifacts
 BAZEL_BIN=$(bazel info bazel-bin --config ci)
 export google_credentials="$gcs_credentials"
 source "build/teamcity-support.sh"  # For log_into_gcloud
 log_into_gcloud
 export GOOGLE_APPLICATION_CREDENTIALS="$PWD/.google-credentials.json"
-$BAZEL_BIN/pkg/cmd/publish-provisional-artifacts/publish-provisional-artifacts_/publish-provisional-artifacts -provisional -release -bucket "$bucket" --gcs-bucket="$gcs_bucket"
+$BAZEL_BIN/pkg/cmd/publish-provisional-artifacts/publish-provisional-artifacts_/publish-provisional-artifacts -provisional -release --gcs-bucket="$gcs_bucket"
 EOF
 tc_end_block "Make and publish release S3 artifacts"
 
@@ -182,14 +180,14 @@ tc_start_block "Publish S3 binaries and archive as latest"
 # Only push the "latest" for our most recent release branch.
 # https://github.com/cockroachdb/cockroach/issues/41067
 if [[ -n "${PUBLISH_LATEST}" && -z "${PRE_RELEASE}" ]]; then
-    BAZEL_SUPPORT_EXTRA_DOCKER_ARGS="-e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e TC_BUILDTYPE_ID -e TC_BUILD_BRANCH=$build_name -e bucket=$bucket -e gcs_credentials -e gcs_bucket=$gcs_bucket" run_bazel << 'EOF'
+    BAZEL_SUPPORT_EXTRA_DOCKER_ARGS="-e TC_BUILDTYPE_ID -e TC_BUILD_BRANCH=$build_name -e gcs_credentials -e gcs_bucket=$gcs_bucket" run_bazel << 'EOF'
 bazel build --config ci //pkg/cmd/publish-provisional-artifacts
 BAZEL_BIN=$(bazel info bazel-bin --config ci)
 export google_credentials="$gcs_credentials"
 source "build/teamcity-support.sh"  # For log_into_gcloud
 log_into_gcloud
 export GOOGLE_APPLICATION_CREDENTIALS="$PWD/.google-credentials.json"
-$BAZEL_BIN/pkg/cmd/publish-provisional-artifacts/publish-provisional-artifacts_/publish-provisional-artifacts -bless -release -bucket "$bucket" --gcs-bucket="$gcs_bucket"
+$BAZEL_BIN/pkg/cmd/publish-provisional-artifacts/publish-provisional-artifacts_/publish-provisional-artifacts -bless -release --gcs-bucket="$gcs_bucket"
 EOF
 
 else
