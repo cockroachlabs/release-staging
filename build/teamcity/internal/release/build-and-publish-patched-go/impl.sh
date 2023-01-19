@@ -3,15 +3,15 @@
 set -xeuo pipefail
 
 # When updating to a new Go version, update all of these variables.
-GOVERS=1.19.4
+GOVERS=1.19.5
 GOLINK=https://go.dev/dl/go$GOVERS.src.tar.gz
-SRCSHASUM=eda74db4ac494800a3e66ee784e495bfbb9b8e535df924a8b01b1a8028b7f368
+SRCSHASUM=8e486e8e85a281fc5ce3f0bedc5b9d2dbf6276d7db0b25d3ec034f313da0375f
 # We mirror the upstream freebsd because we don't have a cross-compiler targeting it.
 GOFREEBSDLINK=https://go.dev/dl/go$GOVERS.freebsd-amd64.tar.gz
-FREEBSDSHASUM=84489ebb63f1757b79574d7345c647bd40bc6414cecb868c93e24476c2d2b9b6
+FREEBSDSHASUM=317996f7427691ff3a7ffd1b6aa089b9c66cd76f32e9107443f2f6aad1bb568a
 # We mirror the upstream darwin/arm64 binary because we don't have code-signing yet.
 GODARWINARMLINK=https://go.dev/dl/go$GOVERS.darwin-arm64.tar.gz
-DARWINARMSHASUM=bb3bc5d7655b9637cfe2b5e90055dee93b0ead50e2ffd091df320d1af1ca853f
+DARWINARMSHASUM=4a67f2bf0601afe2177eb58f825adf83509511d77ab79174db0712dc9efa16c8
 
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -68,44 +68,50 @@ git apply /bootstrap/diff.patch
 cd ..
 
 for CONFIG in linux_amd64 linux_arm64 darwin_amd64 windows_amd64; do
-    case $CONFIG in
-        linux_amd64)
-            CC_FOR_TARGET=/x-tools/x86_64-unknown-linux-gnu/bin/x86_64-unknown-linux-gnu-cc
-            CXX_FOR_TARGET=/x-tools/x86_64-unknown-linux-gnu/bin/x86_64-unknown-linux-gnu-c++
-        ;;
-        linux_arm64)
-            CC_FOR_TARGET=/x-tools/aarch64-unknown-linux-gnu/bin/aarch64-unknown-linux-gnu-cc
-            CXX_FOR_TARGET=/x-tools/aarch64-unknown-linux-gnu/bin/aarch64-unknown-linux-gnu-c++
-        ;;
-        darwin_amd64)
-            CC_FOR_TARGET=/x-tools/x86_64-apple-darwin21.2/bin/x86_64-apple-darwin21.2-cc
-            CXX_FOR_TARGET=/x-tools/x86_64-apple-darwin21.2/bin/x86_64-apple-darwin21.2-c++
-        ;;
-        windows_amd64)
-            CC_FOR_TARGET=/x-tools/x86_64-w64-mingw32/bin/x86_64-w64-mingw32-cc
-            CXX_FOR_TARGET=/x-tools/x86_64-w64-mingw32/bin/x86_64-w64-mingw32-c++
-        ;;
-    esac
-    GOOS=$(echo $CONFIG | cut -d_ -f1)
-    GOARCH=$(echo $CONFIG | cut -d_ -f2)
-    cd go/src
-    if [ $GOOS == darwin ]; then
-        export LD_LIBRARY_PATH=/x-tools/x86_64-apple-darwin21.2/lib
-    fi
-    GOOS=$GOOS GOARCH=$GOARCH CC=clang CXX=clang++ CC_FOR_TARGET=$CC_FOR_TARGET CXX_FOR_TARGET=$CXX_FOR_TARGET \
-               GOROOT_BOOTSTRAP=$(go env GOROOT) CGO_ENABLED=1 ./make.bash
-    if [ $GOOS == darwin ]; then
-        unset LD_LIBRARY_PATH
-    fi
-    cd ../..
-    rm -rf /tmp/go$GOVERS/go/pkg/${GOOS}_$GOARCH/cmd
-    if [ $CONFIG != linux_amd64 ]; then
-        rm go/bin/go go/bin/gofmt
-        mv go/bin/${GOOS}_$GOARCH/* go/bin
-        rm -r go/bin/${GOOS}_$GOARCH
-    fi
-    tar cf - go | gzip -9 > /artifacts/go$GOVERS.$GOOS-$GOARCH.tar.gz
-    rm -rf go/bin
+    for experiment in "" "boringcrypto"; do
+        case $CONFIG in
+            linux_amd64)
+                CC_FOR_TARGET=/x-tools/x86_64-unknown-linux-gnu/bin/x86_64-unknown-linux-gnu-cc
+                CXX_FOR_TARGET=/x-tools/x86_64-unknown-linux-gnu/bin/x86_64-unknown-linux-gnu-c++
+            ;;
+            linux_arm64)
+                CC_FOR_TARGET=/x-tools/aarch64-unknown-linux-gnu/bin/aarch64-unknown-linux-gnu-cc
+                CXX_FOR_TARGET=/x-tools/aarch64-unknown-linux-gnu/bin/aarch64-unknown-linux-gnu-c++
+            ;;
+            darwin_amd64)
+                CC_FOR_TARGET=/x-tools/x86_64-apple-darwin21.2/bin/x86_64-apple-darwin21.2-cc
+                CXX_FOR_TARGET=/x-tools/x86_64-apple-darwin21.2/bin/x86_64-apple-darwin21.2-c++
+            ;;
+            windows_amd64)
+                CC_FOR_TARGET=/x-tools/x86_64-w64-mingw32/bin/x86_64-w64-mingw32-cc
+                CXX_FOR_TARGET=/x-tools/x86_64-w64-mingw32/bin/x86_64-w64-mingw32-c++
+            ;;
+        esac
+        GOOS=$(echo $CONFIG | cut -d_ -f1)
+        GOARCH=$(echo $CONFIG | cut -d_ -f2)
+        cd go/src
+        if [ $GOOS == darwin ]; then
+            export LD_LIBRARY_PATH=/x-tools/x86_64-apple-darwin21.2/lib
+        fi
+        GOEXPERIMENT="$experiment" GOOS=$GOOS GOARCH=$GOARCH CC=clang CXX=clang++ CC_FOR_TARGET=$CC_FOR_TARGET CXX_FOR_TARGET=$CXX_FOR_TARGET \
+                   GOROOT_BOOTSTRAP=$(go env GOROOT) CGO_ENABLED=1 ./make.bash
+        if [ $GOOS == darwin ]; then
+            unset LD_LIBRARY_PATH
+        fi
+        cd ../..
+        rm -rf /tmp/go$GOVERS/go/pkg/${GOOS}_$GOARCH/cmd
+        if [ $CONFIG != linux_amd64 ]; then
+            rm go/bin/go go/bin/gofmt
+            mv go/bin/${GOOS}_$GOARCH/* go/bin
+            rm -r go/bin/${GOOS}_$GOARCH
+        fi
+        suffix=""
+        if [[ $experiment == "boringcrypto" ]]; then
+            suffix="-fips"
+        fi
+        tar cf - go | gzip -9 > /artifacts/go$GOVERS.$GOOS-$GOARCH$suffix.tar.gz
+        rm -rf go/bin
+    done
 done
 
 sha256sum /artifacts/*.tar.gz
