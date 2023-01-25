@@ -593,6 +593,11 @@ func (ec *Context) GetDateStyle() pgdate.DateStyle {
 	return ec.SessionData().GetDateStyle()
 }
 
+// GetCollationEnv returns the collation env.
+func (ec *Context) GetCollationEnv() *tree.CollationEnvironment {
+	return &ec.CollationEnv
+}
+
 // Ctx returns the session's context.
 func (ec *Context) Ctx() context.Context {
 	return ec.Context
