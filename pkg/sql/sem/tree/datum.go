@@ -2005,6 +2005,8 @@ type ParseContext interface {
 	GetIntervalStyle() duration.IntervalStyle
 	// GetDateStyle returns the date style in the session.
 	GetDateStyle() pgdate.DateStyle
+	// GetCollationEnv returns the collation environment.
+	GetCollationEnv() *CollationEnvironment
 }
 
 var _ ParseContext = &simpleParseContext{}
@@ -2032,9 +2034,10 @@ func NewParseContext(relativeParseTime time.Time, opts ...NewParseContextOption)
 }
 
 type simpleParseContext struct {
-	RelativeParseTime time.Time
-	DateStyle         pgdate.DateStyle
-	IntervalStyle     duration.IntervalStyle
+	RelativeParseTime    time.Time
+	DateStyle            pgdate.DateStyle
+	IntervalStyle        duration.IntervalStyle
+	CollationEnvironment CollationEnvironment
 }
 
 // GetRelativeParseTime implements ParseContext.
@@ -2050,6 +2053,11 @@ func (ctx simpleParseContext) GetIntervalStyle() duration.IntervalStyle {
 // GetDateStyle implements ParseContext.
 func (ctx simpleParseContext) GetDateStyle() pgdate.DateStyle {
 	return ctx.DateStyle
+}
+
+// GetCollationEnv implements ParseContext.
+func (ctx simpleParseContext) GetCollationEnv() *CollationEnvironment {
+	return &ctx.CollationEnvironment
 }
 
 // relativeParseTime chooses a reasonable "now" value for
