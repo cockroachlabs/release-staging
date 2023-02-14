@@ -96,18 +96,16 @@ func TestSetMinVersion(t *testing.T) {
 	defer leaktest.AfterTest(t)()
 	defer log.Scope(t).Close(t)
 
-	st := cluster.MakeClusterSettings()
 	p, err := Open(context.Background(), InMemory(), cluster.MakeClusterSettings(), CacheSize(0))
 	require.NoError(t, err)
 	defer p.Close()
-	require.Equal(t, pebble.FormatPrePebblev1Marked, p.db.FormatMajorVersion())
+	require.Equal(t, pebble.FormatMostCompatible, p.db.FormatMajorVersion())
 
-	ValueBlocksEnabled.Override(context.Background(), &st.SV, true)
-	// Advancing the store cluster version to one that supports value blocks
-	// should also advance the store's format major version.
-	err = p.SetMinVersion(clusterversion.ByKey(clusterversion.V23_1EnablePebbleFormatSSTableValueBlocks))
+	// Advancing the store cluster version to V22_2 should also advance the
+	// store's format major version.
+	err = p.SetMinVersion(clusterversion.ByKey(clusterversion.V22_2))
 	require.NoError(t, err)
-	require.Equal(t, pebble.FormatSSTableValueBlocks, p.db.FormatMajorVersion())
+	require.Equal(t, pebble.FormatPrePebblev1Marked, p.db.FormatMajorVersion())
 }
 
 func TestMinVersion_IsNotEncrypted(t *testing.T) {
@@ -121,23 +119,34 @@ func TestMinVersion_IsNotEncrypted(t *testing.T) {
 	defer func() { NewEncryptedEnvFunc = oldNewEncryptedEnvFunc }()
 	NewEncryptedEnvFunc = fauxNewEncryptedEnvFunc
 
-	st := cluster.MakeClusterSettings()
 	fs := vfs.NewMem()
 	p, err := Open(
 		context.Background(),
 		Location{dir: "", fs: fs},
-		st,
+		cluster.MakeClusterSettings(),
 		EncryptionAtRest(nil))
 	require.NoError(t, err)
 	defer p.Close()
-	require.NoError(t, p.SetMinVersion(st.Version.BinaryVersion()))
+
+	v1 := roachpb.Version{Major: 21, Minor: 1, Patch: 0, Internal: 122}
+	v2 := roachpb.Version{Major: 21, Minor: 1, Patch: 0, Internal: 126}
+
+	ok, err := MinVersionIsAtLeastTargetVersion(p.unencryptedFS, p.path, v1)
+	require.NoError(t, err)
+	require.False(t, ok)
+
+	require.NoError(t, p.SetMinVersion(v2))
+
+	ok, err = MinVersionIsAtLeastTargetVersion(p.unencryptedFS, p.path, v1)
+	require.NoError(t, err)
+	require.True(t, ok)
 
 	// Reading the file directly through the unencrypted MemFS should
 	// succeed and yield the correct version.
 	v, ok, err := getMinVersion(fs, "")
 	require.NoError(t, err)
 	require.True(t, ok)
-	require.Equal(t, st.Version.BinaryVersion(), v)
+	require.Equal(t, v2, v)
 }
 
 func fauxNewEncryptedEnvFunc(
