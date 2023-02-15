@@ -9,12 +9,6 @@ permissions:
 
 jobs:
 
-  linux:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v3
-    - run: cd build/release/bincheck && ./test-linux ${{ github.ref_name }} ${{ github.sha }}
-
   darwin:
     runs-on: macos-latest
     steps:

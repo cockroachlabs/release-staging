@@ -254,3 +254,13 @@ if [ $error = 1 ]; then
 fi
 
 tc_end_block "Verify docker images"
+
+tc_start_block "Linux bincheck"
+pushd build/release/bincheck
+for platform_name in amd64 arm64; do
+  docker run -t --platform="linux/$platform_name" -v "$PWD":/workspace ubuntu:focal \
+      bash -c "apt update && apt install curl -y && cd /workspace && ./test-linux-$platform_name $build_name $BUILD_VCS_NUMBER"
+  rm -rf mnt actual aes-128.key cockroach-data cockroach-url cockroach.tar.gz expected
+done
+popd
+tc_end_block "Linux bincheck"
