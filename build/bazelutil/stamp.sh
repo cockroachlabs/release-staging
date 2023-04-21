@@ -77,6 +77,7 @@ BUILD_UTCTIME=$(date -u '+%Y/%m/%d %H:%M:%S')
 # Ref:
 # * https://docs.bazel.build/versions/main/user-manual.html#workspace_status
 # * https://github.com/bazelbuild/rules_go/blob/master/go/core.rst#defines-and-stamping
+# # TODO:
 cat <<EOF
 STABLE_BUILD_CHANNEL ${BUILD_CHANNEL-}
 STABLE_BUILD_TAG ${BUILD_TAG-}
