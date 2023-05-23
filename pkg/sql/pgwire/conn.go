@@ -46,12 +46,19 @@ import (
 	"github.com/cockroachdb/cockroach/pkg/util/ring"
 	"github.com/cockroachdb/cockroach/pkg/util/timeutil"
 	"github.com/cockroachdb/cockroach/pkg/util/tracing"
+	"github.com/cockroachdb/cockroach/pkg/util/uuid"
 	"github.com/cockroachdb/errors"
 	"github.com/cockroachdb/logtags"
 	"github.com/cockroachdb/redact"
 	"github.com/lib/pq/oid"
 	"go.opentelemetry.io/otel/attribute"
 )
+
+type authAudit struct {
+	typ       byte
+	msg       string
+	timestamp time.Time
+}
 
 // conn implements a pgwire network connection (version 3 of the protocol,
 // implemented by Postgres v7.4 and later). conn.serve() reads protocol
@@ -61,6 +68,8 @@ import (
 // the client through the sql.ClientComm interface, implemented by this conn
 // (code is in command_result.go).
 type conn struct {
+	id uuid.UUID
+
 	conn net.Conn
 
 	sessionArgs sql.SessionArgs
@@ -112,6 +121,11 @@ type conn struct {
 
 	// afterReadMsgTestingKnob is called after reading every message.
 	afterReadMsgTestingKnob func(context.Context) error
+
+	authAudits struct {
+		mu         sync.Mutex
+		authAudits []authAudit
+	}
 }
 
 // serveConn creates a conn that will serve the netConn. It returns once the
@@ -160,12 +174,11 @@ func (s *Server) serveConn(
 	connStart time.Time,
 	authOpt authOptions,
 ) {
-	if log.V(2) {
-		log.Infof(ctx, "new connection with options: %+v", sArgs)
-	}
-
 	c := newConn(netConn, sArgs, &s.metrics, connStart, &s.execCfg.Settings.SV)
 	c.alwaysLogAuthActivity = alwaysLogAuthActivity || atomic.LoadInt32(&s.testingAuthLogEnabled) > 0
+	if c.authLogEnabled() {
+		log.Infof(ctx, "new connection connID=%s with options: %+v", c.id, sArgs)
+	}
 	if s.execCfg.PGWireTestingKnobs != nil {
 		c.afterReadMsgTestingKnob = s.execCfg.PGWireTestingKnobs.AfterReadMsgTestingKnob
 	}
@@ -189,6 +202,7 @@ func newConn(
 	sv *settings.Values,
 ) *conn {
 	c := &conn{
+		id:          uuid.FastMakeV4(),
 		conn:        netConn,
 		sessionArgs: sArgs,
 		metrics:     metrics,
@@ -459,6 +473,17 @@ func (c *conn) serveImpl(
 				// we terminated the connection prematurely (as opposed to seeing a ClientMsgTerminate
 				// packet) and instead return a broken pipe or io.EOF error message.
 				return false, isSimpleQuery, errors.Wrap(err, "pgwire: error reading input")
+			}
+			if c.authLogEnabled() && !authDone {
+				func() {
+					c.authAudits.mu.Lock()
+					defer c.authAudits.mu.Unlock()
+					c.authAudits.authAudits = append(c.authAudits.authAudits, authAudit{
+						typ:       byte(typ),
+						msg:       string(c.readBuf.Msg),
+						timestamp: timeutil.Now(),
+					})
+				}()
 			}
 			timeReceived := timeutil.Now()
 			log.VEventf(ctx, 2, "pgwire: processing %s", typ)

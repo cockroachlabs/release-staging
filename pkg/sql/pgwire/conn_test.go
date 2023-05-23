@@ -16,7 +16,6 @@ import (
 	gosql "database/sql"
 	"database/sql/driver"
 	"fmt"
-	"github.com/cockroachdb/cockroach/pkg/server/serversettings"
 	"io"
 	"net"
 	"net/url"
@@ -2097,12 +2096,23 @@ func TestShutdownCancelsAuth(t *testing.T) {
 
 	ctx := context.Background()
 
+	var sleep atomic.Bool
 	// Start test server.
 	clusterSettings := cluster.MakeClusterSettings()
-	serversettings.DrainWait.Override(ctx, &clusterSettings.SV, 5*time.Second)
+	logSessionAuth.Override(ctx, &clusterSettings.SV, true)
 	s, db, _ := serverutils.StartServer(t, base.TestServerArgs{
 		AcceptSQLWithoutTLS: true,
 		Settings:            clusterSettings,
+		Knobs: base.TestingKnobs{
+			PGWireTestingKnobs: &sql.PGWireTestingKnobs{
+				AfterReadMsgTestingKnob: func(ctx context.Context) error {
+					if sleep.Load() {
+						time.Sleep(6 * time.Minute)
+					}
+					return nil
+				},
+			},
+		},
 	})
 	defer s.Stopper().Stop(ctx)
 
@@ -2149,15 +2159,7 @@ func TestShutdownCancelsAuth(t *testing.T) {
 	scramResp, err = scramConversation.Step(serverResponse1)
 	require.NoError(t, err)
 
-	// Drain the server async.
-	var wg sync.WaitGroup
-	defer wg.Wait()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		s.Drain(ctx)
-	}()
-	time.Sleep(2 * time.Second)
+	sleep.Store(true)
 
 	// Send SASLResponse.
 	msg = fe.sendAndReceive(&pgproto3.SASLResponse{
@@ -2172,4 +2174,7 @@ func TestShutdownCancelsAuth(t *testing.T) {
 	msg, err = fe.Receive()
 	require.NoError(t, err)
 	require.IsType(t, &pgproto3.AuthenticationOk{}, msg)
+
+	t.Log("sleeping at end of test")
+	time.Sleep(10 * time.Minute)
 }
