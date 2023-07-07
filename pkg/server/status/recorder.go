@@ -15,6 +15,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/prometheus/common/expfmt"
 	"io"
 	"math"
 	"os"
@@ -311,9 +312,9 @@ func (mr *MetricsRecorder) ScrapeIntoPrometheus(pm *metric.PrometheusExporter) {
 // PrintAsText writes the current metrics values as plain-text to the writer.
 // We write metrics to a temporary buffer which is then copied to the writer.
 // This is to avoid hanging requests from holding the lock.
-func (mr *MetricsRecorder) PrintAsText(w io.Writer) error {
+func (mr *MetricsRecorder) PrintAsText(w io.Writer, contentType expfmt.Format) error {
 	var buf bytes.Buffer
-	if err := mr.prometheusExporter.ScrapeAndPrintAsText(&buf, mr.ScrapeIntoPrometheus); err != nil {
+	if err := mr.prometheusExporter.ScrapeAndPrintAsText(&buf, contentType, mr.ScrapeIntoPrometheus); err != nil {
 		return err
 	}
 	_, err := buf.WriteTo(w)
