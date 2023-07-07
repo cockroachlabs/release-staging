@@ -206,6 +206,17 @@ func HdrEnabled() bool {
 	return hdrEnabled
 }
 
+// useNativeHistogramsEnvVar can be used to enable the Prometheus native
+// histogram feature, which represents a histogram as a single time series
+// rather than a collection of per-bucket counter series. If enabled, native
+// histograms use the default exponential bucket size factor of 1.1 and a
+// maximum bucket count equal to the number of buckets used by the
+// corresponding conventional histogram. If enabled, both conventional and
+// native histograms are exported.
+const useNativeHistogramsEnvVar = "COCKROACH_ENABLE_NATIVE_HISTOGRAMS"
+
+var nativeHistogramsEnabled = util.ConstantWithMetamorphicTestBool(useNativeHistogramsEnvVar, envutil.EnvOrDefaultBool(useNativeHistogramsEnvVar, false))
+
 type HistogramMode byte
 
 const (
@@ -271,6 +282,10 @@ func newHistogram(meta Metadata, duration time.Duration, buckets []float64) *His
 	// plumbing and don't fit into the PrometheusObservable interface any more.
 	opts := prometheus.HistogramOpts{
 		Buckets: buckets,
+	}
+	if nativeHistogramsEnabled {
+		opts.NativeHistogramBucketFactor = 1.1
+		opts.NativeHistogramMaxBucketNumber = uint32(len(buckets))
 	}
 	cum := prometheus.NewHistogram(opts)
 	h := &Histogram{
@@ -474,6 +489,10 @@ func NewManualWindowHistogram(
 ) *ManualWindowHistogram {
 	opts := prometheus.HistogramOpts{
 		Buckets: buckets,
+	}
+	if nativeHistogramsEnabled {
+		opts.NativeHistogramBucketFactor = 1.1
+		opts.NativeHistogramMaxBucketNumber = uint32(len(buckets))
 	}
 	cum := prometheus.NewHistogram(opts)
 	prev := &prometheusgo.Metric{}
