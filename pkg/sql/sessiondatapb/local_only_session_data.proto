@@ -393,6 +393,10 @@ message LocalOnlySessionData {
   // column involved a single column and that column was equated with a single
   // constant value in a WHERE clause filter.
   bool optimizer_use_improved_computed_column_filters_derivation = 104;
+  // OptimizerUseImprovedJoinElimination, when true, allows the optimizer to
+  // eliminate joins in more cases by inferring equalities from self-joins and
+  // remapping columns from the eliminated to the preserved side of the join.
+  bool optimizer_use_improved_join_elimination = 105;
 
   ///////////////////////////////////////////////////////////////////////////
   // WARNING: consider whether a session parameter you're adding needs to  //

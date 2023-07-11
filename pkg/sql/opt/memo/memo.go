@@ -166,6 +166,7 @@ type Memo struct {
 	alwaysUseHistograms                        bool
 	hoistUncorrelatedEqualitySubqueries        bool
 	useImprovedComputedColumnFiltersDerivation bool
+	useImprovedJoinElimination                 bool
 
 	// curRank is the highest currently in-use scalar expression rank.
 	curRank opt.ScalarRank
@@ -227,6 +228,7 @@ func (m *Memo) Init(ctx context.Context, evalCtx *eval.Context) {
 		alwaysUseHistograms:                        evalCtx.SessionData().OptimizerAlwaysUseHistograms,
 		hoistUncorrelatedEqualitySubqueries:        evalCtx.SessionData().OptimizerHoistUncorrelatedEqualitySubqueries,
 		useImprovedComputedColumnFiltersDerivation: evalCtx.SessionData().OptimizerUseImprovedComputedColumnFiltersDerivation,
+		useImprovedJoinElimination:                 evalCtx.SessionData().OptimizerUseImprovedJoinElimination,
 	}
 	m.metadata.Init()
 	m.logPropsBuilder.init(ctx, evalCtx, m)
@@ -371,7 +373,8 @@ func (m *Memo) IsStale(
 		m.useImprovedSplitDisjunctionForJoins != evalCtx.SessionData().OptimizerUseImprovedSplitDisjunctionForJoins ||
 		m.alwaysUseHistograms != evalCtx.SessionData().OptimizerAlwaysUseHistograms ||
 		m.hoistUncorrelatedEqualitySubqueries != evalCtx.SessionData().OptimizerHoistUncorrelatedEqualitySubqueries ||
-		m.useImprovedComputedColumnFiltersDerivation != evalCtx.SessionData().OptimizerUseImprovedComputedColumnFiltersDerivation {
+		m.useImprovedComputedColumnFiltersDerivation != evalCtx.SessionData().OptimizerUseImprovedComputedColumnFiltersDerivation ||
+		m.useImprovedJoinElimination != evalCtx.SessionData().OptimizerUseImprovedJoinElimination {
 		return true, nil
 	}
 

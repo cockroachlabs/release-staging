@@ -42,6 +42,68 @@
 =>
 (Project $right $projections $passthrough)
 
+# EliminateJoinUnderProjectLeftWithRemap is similar to
+# EliminateJoinUnderProjectLeft, but has the ability to remap columns from the
+# right input to the left input to allow the elimination to proceed.
+[EliminateJoinUnderProjectLeftWithRemap, Normalize]
+(Project
+    $join:(InnerJoin | LeftJoin $left:* $right:*) &
+        (UseImprovedJoinElimination) &
+        (JoinDoesNotDuplicateLeftRows $join) &
+        (JoinPreservesLeftRows $join)
+    $projections:*
+    $passthrough:* &
+        (CanRemapCols
+            (UnionCols
+                $passthrough
+                (ProjectionOuterCols $projections)
+            )
+            $leftCols:(OutputCols $left)
+            $fds:(FuncDeps $join)
+        )
+)
+=>
+(Project
+    $left
+    (MergeProjections
+        (RemapProjectionCols $projections $leftCols $fds)
+        (ProjectRemappedCols $passthrough $leftCols $fds)
+        $passthrough
+    )
+    (DifferenceCols $passthrough (OutputCols $right))
+)
+
+# EliminateJoinUnderProjectRightWithRemap is similar to
+# EliminateJoinUnderProjectRight, but has the ability to remap columns from the
+# right input to the left input to allow the elimination to proceed.
+[EliminateJoinUnderProjectRightWithRemap, Normalize]
+(Project
+    $join:(InnerJoin $left:* $right:*) &
+        (UseImprovedJoinElimination) &
+        (JoinDoesNotDuplicateRightRows $join) &
+        (JoinPreservesRightRows $join)
+    $projections:*
+    $passthrough:* &
+        (CanRemapCols
+            (UnionCols
+                $passthrough
+                (ProjectionOuterCols $projections)
+            )
+            $rightCols:(OutputCols $right)
+            $fds:(FuncDeps $join)
+        )
+)
+=>
+(Project
+    $right
+    (MergeProjections
+        (RemapProjectionCols $projections $rightCols $fds)
+        (ProjectRemappedCols $passthrough $rightCols $fds)
+        $passthrough
+    )
+    (DifferenceCols $passthrough (OutputCols $left))
+)
+
 # EliminateProject discards a Project operator which is not adding or removing
 # columns.
 [EliminateProject, Normalize]

@@ -24,6 +24,7 @@ import (
 	"github.com/cockroachdb/cockroach/pkg/sql/sem/tree"
 	"github.com/cockroachdb/cockroach/pkg/sql/types"
 	"github.com/cockroachdb/cockroach/pkg/util/buildutil"
+	"github.com/cockroachdb/cockroach/pkg/util/intsets"
 	"github.com/cockroachdb/errors"
 	"github.com/cockroachdb/redact"
 )
@@ -455,7 +456,7 @@ func (b *logicalPropsBuilder) buildJoinProps(join RelExpr, rel *props.Relational
 
 	// Functional Dependencies
 	// -----------------------
-	h.setFuncDeps(rel)
+	h.setFuncDeps(b.evalCtx, rel)
 
 	// Cardinality
 	// -----------
@@ -2445,7 +2446,7 @@ func (h *joinPropsHelper) notNullCols() opt.ColSet {
 	return notNullCols
 }
 
-func (h *joinPropsHelper) setFuncDeps(rel *props.Relational) {
+func (h *joinPropsHelper) setFuncDeps(evalCtx *eval.Context, rel *props.Relational) {
 	// Start with FDs from left side, and modify based on join type.
 	rel.FuncDeps.CopyFrom(&h.leftProps.FuncDeps)
 
@@ -2512,6 +2513,75 @@ func (h *joinPropsHelper) setFuncDeps(rel *props.Relational) {
 		// Call ProjectCols to trigger simplification, since outer joins may have
 		// created new possibilities for simplifying removed columns.
 		rel.FuncDeps.ProjectCols(rel.OutputCols)
+	}
+	if evalCtx.SessionData().OptimizerUseImprovedJoinElimination {
+		h.addSelfJoinImpliedFDs(rel)
+	}
+}
+
+// addSelfJoinImpliedFDs adds any extra equality FDs that are implied by a self
+// join equality between key columns on a table.
+func (h *joinPropsHelper) addSelfJoinImpliedFDs(rel *props.Relational) {
+	md := h.join.Memo().Metadata()
+	leftCols, rightCols := h.leftProps.OutputCols, h.rightProps.OutputCols
+	if !rel.FuncDeps.ComputeEquivClosure(leftCols).Intersects(rightCols) {
+		// There are no equalities between left and right columns.
+		return
+	}
+	// Map from the table ID to the column ordinals within the table.
+	getTables := func(cols opt.ColSet) map[opt.TableID]intsets.Fast {
+		var tables map[opt.TableID]intsets.Fast
+		cols.ForEach(func(col opt.ColumnID) {
+			if tab := md.ColumnMeta(col).Table; tab != opt.TableID(0) {
+				if tables == nil {
+					tables = make(map[opt.TableID]intsets.Fast)
+				}
+				colOrds := tables[tab]
+				colOrds.Add(tab.ColumnOrdinal(col))
+				tables[tab] = colOrds
+			}
+		})
+		return tables
+	}
+	leftTables := getTables(leftCols)
+	if leftTables == nil {
+		return
+	}
+	rightTables := getTables(rightCols)
+	if rightTables == nil {
+		return
+	}
+	for leftTable, leftTableOrds := range leftTables {
+		var baseTabFDs *props.FuncDepSet
+		for rightTable, rightTableOrds := range rightTables {
+			if md.TableMeta(leftTable).Table.ID() != md.TableMeta(rightTable).Table.ID() {
+				continue
+			}
+			// This is a self-join. If there are equalities between columns at the
+			// same ordinal positions in each (meta) table and those columns form a
+			// key on the base table, *every* pair of columns at the same ordinal
+			// position is equal.
+			var eqCols opt.ColSet
+			colOrds := leftTableOrds.Intersection(rightTableOrds)
+			for colOrd, ok := colOrds.Next(0); ok; colOrd, ok = colOrds.Next(colOrd + 1) {
+				leftCol, rightCol := leftTable.ColumnID(colOrd), rightTable.ColumnID(colOrd)
+				if rel.FuncDeps.AreColsEquiv(leftCol, rightCol) {
+					eqCols.Add(leftCol)
+					eqCols.Add(rightCol)
+				}
+			}
+			if baseTabFDs == nil {
+				baseTabFDs = MakeTableFuncDep(md, leftTable)
+			}
+			if !eqCols.Empty() && baseTabFDs.ColsAreStrictKey(eqCols) &&
+				h.rightProps.FuncDeps.ColsAreStrictKey(eqCols) {
+				// Add equalities between each pair of columns at the same ordinal
+				// position, ignoring those that aren't part of the output.
+				for colOrd, ok := colOrds.Next(0); ok; colOrd, ok = colOrds.Next(colOrd + 1) {
+					rel.FuncDeps.AddEquivalency(leftTable.ColumnID(colOrd), rightTable.ColumnID(colOrd))
+				}
+			}
+		}
 	}
 }
 
