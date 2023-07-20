@@ -1,4 +1,5 @@
 # Shell support functions and variables. Bash-only.
+# Trigger a customized build
 
 # Terminal color codes.
 term_reset=$(tput sgr0 2>/dev/null || true)
