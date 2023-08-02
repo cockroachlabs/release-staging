@@ -60,7 +60,7 @@ func NewLocalService(opts ...LocalOption) Service {
 		clock:        time.Now,
 		maxCacheSize: 1e6, /* 1 million */
 		baseDelay:    time.Second,
-		maxDelay:     time.Hour,
+		maxDelay:     time.Minute,
 	}
 	cacheConfig := cache.Config{
 		Policy:      cache.CacheLRU,
