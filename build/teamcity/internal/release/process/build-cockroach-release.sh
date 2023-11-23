@@ -71,7 +71,7 @@ if [[ $platform == "linux-amd64" || $platform == "linux-arm64" || $platform == "
     --strip-components=1
   cp --recursive licenses "build/deploy-${platform}"
   # Move the libs where Dockerfile expects them to be
-  mv build/deploy-${platform_name}/lib/* build/deploy-${platform}/
+  mv build/deploy-${platform}/lib/* build/deploy-${platform}/
   rmdir build/deploy-${platform}/lib
 
   build_docker_tag="${gcr_staged_repository}:${arch}-${version}"
