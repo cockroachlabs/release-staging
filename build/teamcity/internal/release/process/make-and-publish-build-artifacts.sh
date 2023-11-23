@@ -77,7 +77,7 @@ $BAZEL_BIN/pkg/cmd/publish-provisional-artifacts/publish-provisional-artifacts_/
 EOF
 tc_end_block "Compile and publish artifacts"
 
-if [[ $platform == "linux-amd64" || $platform == "linux-arm64" ]]; then
+if [[ $platform == "linux-amd64" || $platform == "linux-arm64" || $platform == "linux-amd64-fips" ]]; then
   arch="amd64"
   if [[ $platform == "linux-arm64" ]]; then
     arch="arm64"
@@ -86,49 +86,29 @@ if [[ $platform == "linux-amd64" || $platform == "linux-arm64" ]]; then
   tc_start_block "Make and push docker image"
   docker_login_with_google
 
-  cp --recursive "build/deploy" "build/deploy-${arch}"
+  cp --recursive "build/deploy" "build/deploy-${platform}"
   tar \
-    --directory="build/deploy-${arch}" \
+    --directory="build/deploy-${platform}" \
     --extract \
     --file="artifacts/cockroach-${build_name}.${platform}.tgz" \
     --ungzip \
     --ignore-zeros \
     --strip-components=1
-  cp --recursive licenses "build/deploy-${arch}"
+  cp --recursive licenses "build/deploy-${platform}"
   # Move the libs where Dockerfile expects them to be
-  mv build/deploy-${arch}/lib/* build/deploy-${arch}/
-  rmdir build/deploy-${arch}/lib
+  mv build/deploy-${platform}/lib/* build/deploy-${platform}/
+  rmdir build/deploy-${platform}/lib
 
   build_docker_tag="${gcr_repository}:${arch}-${build_name}"
-  docker build --no-cache --pull --platform "linux/${arch}" --tag="${build_docker_tag}" "build/deploy-${arch}"
+  if [[ $platform == "linux-amd64-fips" ]]; then
+    build_docker_tag="${gcr_repository}:${build_name}-fips"
+    docker build --no-cache --pull --platform "linux/${arch}" --tag="${build_docker_tag}" --build-arg fips_enabled=1 "build/deploy-${platform}"
+  else
+    docker build --no-cache --pull --platform "linux/${arch}" --tag="${build_docker_tag}" "build/deploy-${platform}"
+  fi
   docker push "$build_docker_tag"
 
   tc_end_block "Make and push docker images"
-fi
-
-
-if [[ $platform == "linux-amd64-fips" ]]; then
-  tc_start_block "Make and push FIPS docker image"
-  gcr_tag_fips="${gcr_repository}:${build_name}-fips"
-  platform_name=amd64-fips
-  rm -rf "build/deploy-${platform_name}"
-  cp --recursive "build/deploy" "build/deploy-${platform_name}"
-  tar \
-    --directory="build/deploy-${platform_name}" \
-    --extract \
-    --file="artifacts/cockroach-${build_name}.linux-${platform_name}.tgz" \
-    --ungzip \
-    --ignore-zeros \
-    --strip-components=1
-  cp --recursive licenses "build/deploy-${platform_name}"
-  # Move the libs where Dockerfile expects them to be
-  mv build/deploy-${platform_name}/lib/* build/deploy-${platform_name}/
-  rmdir build/deploy-${platform_name}/lib
-
-  docker build --no-cache --pull --platform "linux/amd64" --tag="${gcr_tag_fips}" --build-arg fips_enabled=1 "build/deploy-${platform_name}"
-  docker push "$gcr_tag_fips"
-
-  tc_end_block "Make and push FIPS docker image"
 fi
 
 # Make finding the tag name easy.
@@ -139,11 +119,13 @@ Build ID: ${build_name}
 
 The binaries will be available at:
   https://storage.googleapis.com/$gcs_bucket/cockroach-$build_name.linux-amd64.tgz
+  https://storage.googleapis.com/$gcs_bucket/cockroach-$build_name.linux-amd64-fips.tgz
   https://storage.googleapis.com/$gcs_bucket/cockroach-$build_name.linux-arm64.tgz
   https://storage.googleapis.com/$gcs_bucket/cockroach-$build_name.darwin-10.9-amd64.tgz
   https://storage.googleapis.com/$gcs_bucket/cockroach-$build_name.windows-6.2-amd64.zip
 
 Pull the docker image by:
   docker pull $gcr_repository:$build_name
+  docker pull $gcr_repository:$build_name-fips
 
 EOF
