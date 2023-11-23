@@ -33,6 +33,8 @@ else
   export gcs_credentials="$GCS_CREDENTIALS_DEV"
   gcr_staged_repository="us-docker.pkg.dev/releases-dev-356314/cockroachdb-staged-releases/cockroach"
 fi
+# the script is called as PLATFORM=linux-arm64 ./$0
+platform="$PLATFORM"
 
 tc_end_block "Variable Setup"
 
@@ -40,107 +42,52 @@ tc_end_block "Variable Setup"
 tc_start_block "Make and publish release artifacts"
 # Using publish-provisional-artifacts here is funky. We're directly publishing
 # the official binaries, not provisional ones. Legacy naming. To clean up...
-BAZEL_SUPPORT_EXTRA_DOCKER_ARGS="-e TC_BUILDTYPE_ID -e TC_BUILD_BRANCH=$version -e gcs_credentials -e gcs_bucket=$gcs_bucket" run_bazel << 'EOF'
+BAZEL_SUPPORT_EXTRA_DOCKER_ARGS="-e TC_BUILDTYPE_ID -e TC_BUILD_BRANCH=$version -e gcs_credentials -e gcs_bucket=$gcs_bucket -e platform=$platform" run_bazel << 'EOF'
 bazel build --config ci //pkg/cmd/publish-provisional-artifacts
 BAZEL_BIN=$(bazel info bazel-bin --config ci)
 export google_credentials="$gcs_credentials"
 source "build/teamcity-support.sh"  # For log_into_gcloud
 log_into_gcloud
 export GOOGLE_APPLICATION_CREDENTIALS="$PWD/.google-credentials.json"
-$BAZEL_BIN/pkg/cmd/publish-provisional-artifacts/publish-provisional-artifacts_/publish-provisional-artifacts -provisional -release --gcs-bucket="$gcs_bucket" --output-directory=artifacts
+$BAZEL_BIN/pkg/cmd/publish-provisional-artifacts/publish-provisional-artifacts_/publish-provisional-artifacts -provisional -release --gcs-bucket="$gcs_bucket" --output-directory=artifacts --platform=$platform
 EOF
 tc_end_block "Make and publish release artifacts"
 
 
-tc_start_block "Make and push multiarch docker images"
-docker_login_gcr "$gcr_staged_repository" "$gcr_credentials"
-
-declare -a gcr_arch_tags
-
-for platform_name in amd64 arm64; do
-  cp --recursive "build/deploy" "build/deploy-${platform_name}"
+if [[ $platform == "linux-amd64" || $platform == "linux-arm64" || $platform == "linux-amd64-fips" ]]; then
+  tc_start_block "Make and push docker image"
+  docker_login_gcr "$gcr_staged_repository" "$gcr_credentials"
+  arch="amd64"
+  if [[ $platform == "linux-arm64" ]]; then
+    arch="arm64"
+  fi
+  cp --recursive "build/deploy" "build/deploy-${platform}"
   tar \
-    --directory="build/deploy-${platform_name}" \
+    --directory="build/deploy-${platform}" \
     --extract \
-    --file="artifacts/cockroach-${version}.linux-${platform_name}.tgz" \
+    --file="artifacts/cockroach-${version}.${platform}.tgz" \
     --ungzip \
     --ignore-zeros \
     --strip-components=1
-  cp --recursive licenses "build/deploy-${platform_name}"
+  cp --recursive licenses "build/deploy-${platform}"
   # Move the libs where Dockerfile expects them to be
-  mv build/deploy-${platform_name}/lib/* build/deploy-${platform_name}/
-  rmdir build/deploy-${platform_name}/lib
+  mv build/deploy-${platform_name}/lib/* build/deploy-${platform}/
+  rmdir build/deploy-${platform}/lib
 
-  gcr_arch_tag="${gcr_staged_repository}:${platform_name}-${version}"
-  gcr_arch_tags+=("$gcr_arch_tag")
-
-  # Tag the arch specific images with only one tag per repository. The manifests will reference the tags.
-  docker build \
-    --label version="$version_label" \
-    --no-cache \
-    --pull \
-    --platform="linux/${platform_name}" \
-    --tag="${gcr_arch_tag}" \
-    "build/deploy-${platform_name}"
-  docker push "$gcr_arch_tag"
-done
-
-gcr_tag="${gcr_staged_repository}:${version}"
-docker manifest rm "${gcr_tag}" || :
-docker manifest create "${gcr_tag}" "${gcr_arch_tags[@]}"
-docker manifest push "${gcr_tag}"
-
-tc_end_block "Make and push multiarch docker images"
-
-
-tc_start_block "Make and push FIPS docker image"
-platform_name=amd64-fips
-cp --recursive "build/deploy" "build/deploy-${platform_name}"
-tar \
-  --directory="build/deploy-${platform_name}" \
-  --extract \
-  --file="artifacts/cockroach-${version}.linux-${platform_name}.tgz" \
-  --ungzip \
-  --ignore-zeros \
-  --strip-components=1
-cp --recursive licenses "build/deploy-${platform_name}"
-# Move the libs where Dockerfile expects them to be
-mv build/deploy-${platform_name}/lib/* build/deploy-${platform_name}/
-rmdir build/deploy-${platform_name}/lib
-
-gcr_tag_fips="${gcr_staged_repository}:${version}-fips"
-
-# Tag the arch specific images with only one tag per repository. The manifests will reference the tags.
-docker build \
-  --label version="$version_label" \
-  --no-cache \
-  --pull \
-  --platform="linux/amd64" \
-  --tag="${gcr_tag_fips}" \
-  --build-arg fips_enabled=1 \
-  "build/deploy-${platform_name}"
-docker push "$gcr_tag_fips"
-tc_end_block "Make and push FIPS docker image"
-
-
-tc_start_block "Verify docker images"
-error=0
-for platform_name in amd64 arm64; do
-    tc_start_block "Verify $gcr_tag on $platform_name"
-    if ! verify_docker_image "$gcr_tag" "linux/$platform_name" "$BUILD_VCS_NUMBER" "$version" false; then
-      error=1
-    fi
-    tc_end_block "Verify $gcr_tag on $platform_name"
-done
-
-tc_start_block "Verify $gcr_tag_fips"
-if ! verify_docker_image "$gcr_tag_fips" "linux/amd64" "$BUILD_VCS_NUMBER" "$version" true; then
-  error=1
+  build_docker_tag="${gcr_staged_repository}:${arch}-${version}"
+  if [[ $platform == "linux-amd64-fips" ]]; then
+    build_docker_tag="${gcr_staged_repository}:${version}-fips"
+    docker build --label version="$version_label" --no-cache --pull --platform="linux/${arch}" --tag="${build_docker_tag}" --build-arg fips_enabled=1 "build/deploy-${platform}"
+  else
+    docker build --label version="$version_label" --no-cache --pull --platform="linux/${arch}" --tag="${build_docker_tag}" "build/deploy-${platform}"
+  fi
+  docker push "$build_docker_tag"
+  tc_end_block "Make and push docker image"
 fi
-tc_end_block "Verify $gcr_tag_fips"
 
-if [ $error = 1 ]; then
-  echo "ERROR: Docker image verification failed, see logs above"
-  exit 1
+
+if [[ $platform == "linux-amd64-fips" ]]; then
+  tc_start_block "Verify FIPS docker image"
+  verify_docker_image "$build_docker_tag" "linux/amd64" "$BUILD_VCS_NUMBER" "$version" true
+  tc_end_block "Verify FIPS docker image"
 fi
-tc_end_block "Verify docker images"

@@ -4,7 +4,6 @@ set -euxo pipefail
 
 dir="$(dirname $(dirname $(dirname $(dirname $(dirname "${0}")))))"
 source "$dir/release/teamcity-support.sh"
-source "$dir/teamcity-bazel-support.sh"  # for run_bazel
 
 tc_start_block "Variable Setup"
 
